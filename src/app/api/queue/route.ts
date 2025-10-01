@@ -15,6 +15,29 @@ function getAuth() {
   });
 }
 
+export async function GET() {
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: "v4", auth });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_NAME}!A:C`,
+    });
+
+    const rows = res.data.values || [];
+    const queues = rows.map((row) => ({
+      queue: row[0],
+      timestamp: row[1],
+      status: row[2] || "",
+    }));
+
+    return NextResponse.json({ queues });
+  } catch (err: any) {
+    console.error(err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { action, currentQueue } = await req.json();
