@@ -8,33 +8,29 @@ type QueueItem = {
   status: "empty" | "attend" | "absent";
 };
 
-export default function QueueUI({ initialQueue }: { initialQueue: string }) {
-  const [queues, setQueues] = useState<QueueItem[]>([]);
-  const [currentQueue, setCurrentQueue] = useState<string>(initialQueue);
+export default function QueueUI() {
+  const [currentQueue, setCurrentQueue] = useState<string>("");
   const [day, setDay] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
 
-  useEffect(() => {
-    async function fetchQueues() {
-      try {
-        const res = await fetch("/api/queue");
-        const data: { queues: QueueItem[] } = await res.json();
-        console.log(data);
-        setQueues(data.queues);
-
-        // Keep currentQueue if exists, otherwise first queue
-        setCurrentQueue((prev) => {
-          if (data.queues.some((q) => q.queue === prev)) return prev;
-          return data.queues[1]?.queue || "";
-        });
-      } catch (err) {
-        console.error("Failed to fetch queues:", err);
+  // Fetch the latest queue
+  const fetchLatestQueue = async () => {
+    try {
+      const res = await fetch("/api/queue");
+      const data: { queues: QueueItem[] } = await res.json();
+      if (data.queues.length > 0) {
+        const lastQueue = data.queues[data.queues.length - 1].queue;
+        setCurrentQueue(lastQueue);
       }
+    } catch (err) {
+      console.error("Failed to fetch latest queue:", err);
     }
+  };
 
-    fetchQueues();
-    const interval = setInterval(fetchQueues, 5000);
+  useEffect(() => {
+    fetchLatestQueue();
+    const interval = setInterval(fetchLatestQueue, 5000); // refresh every 5s
     return () => clearInterval(interval);
   }, []);
 
@@ -68,29 +64,18 @@ export default function QueueUI({ initialQueue }: { initialQueue: string }) {
     return () => clearInterval(interval);
   }, []);
 
-  async function handleAction(action: "Attend" | "Absent" | "New") {
+  async function handleAction() {
     try {
       const res = await fetch("/api/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, currentQueue }),
+        body: JSON.stringify({ action: "New" }),
       });
-      const data: { newQueue?: string; currentQueue?: string } =
-        await res.json();
-
-      if (action === "New" && data.newQueue) {
+      const data: { newQueue?: string } = await res.json();
+      if (data.newQueue) {
         printTicket(data.newQueue);
-      } else if (
-        (action === "Attend" || action === "Absent") &&
-        data.currentQueue
-      ) {
-        setCurrentQueue(data.currentQueue);
+        setCurrentQueue(data.newQueue);
       }
-
-      // Immediately refresh queues
-      const refreshed = await fetch("/api/queue");
-      const refreshedData: { queues: QueueItem[] } = await refreshed.json();
-      setQueues(refreshedData.queues);
     } catch (err) {
       console.error("Queue action failed:", err);
     }
@@ -127,11 +112,6 @@ export default function QueueUI({ initialQueue }: { initialQueue: string }) {
     printWindow.close();
   }
 
-  // Safe slice for next queues
-  const currentIndex = queues.findIndex((q) => q.queue === currentQueue);
-  const nextQueues =
-    currentIndex >= 0 ? queues.slice(currentIndex + 1, currentIndex + 10) : [];
-
   return (
     <div className="flex flex-col h-screen bg-gray-100">
       {/* Header */}
@@ -147,55 +127,28 @@ export default function QueueUI({ initialQueue }: { initialQueue: string }) {
         </div>
       </div>
 
-      <div className="flex-grow flex p-6 gap-6">
-        {/* Current Queue */}
-        <div className="flex-1 flex flex-col">
-          <div className="bg-white rounded-lg shadow-lg p-8 flex-grow flex flex-col justify-center items-center border-2 border-blue-200">
-            <div className="text-lg font-medium text-gray-600 mb-4">
-              Sedang Dilayani :
-            </div>
-            <div className="text-xl font-semibold text-blue-600 mb-2">
-              Nomor Antrian
-            </div>
-            <div className="text-6xl font-bold text-orange-500 border-4 border-orange-500 rounded-lg px-8 py-4 mb-6">
-              {currentQueue || "Loading..."}
-            </div>
+      {/* Current Queue */}
+      <div className="flex-grow flex p-6 justify-center items-center">
+        <div className="bg-white rounded-lg shadow-lg p-12 w-[60%] h-[75%] flex flex-col justify-center items-center border-2 border-blue-200">
+          <div className="text-2xl font-medium text-gray-600 mb-4">
+            Sedang Dilayani :
           </div>
-        </div>
-
-        {/* Next Queues */}
-        <div className="flex-1 flex flex-col gap-4">
-          {nextQueues.map((q) => (
-            <div
-              key={q.queue}
-              className="bg-blue-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center justify-between font-medium text-lg"
-            >
-              <span>{q.queue}</span>
-              <span className="text-sm text-gray-200">{q.status}</span>
-            </div>
-          ))}
+          <div className="text-4xl font-semibold text-blue-600 mb-2">
+            Nomor Antrian
+          </div>
+          <div className="text-8xl font-bold mt-5 text-orange-500 border-4 border-orange-500 rounded-lg px-8 py-4">
+            {currentQueue || "Loading..."}
+          </div>
         </div>
       </div>
 
-      {/* Footer Buttons */}
+      {/* Footer */}
       <div className="flex justify-center items-center p-6 bg-white shadow-sm gap-4">
         <button
-          onClick={() => handleAction("Absent")}
-          className="bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-red-700"
+          onClick={handleAction}
+          className="bg-blue-600 font-bold text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-700"
         >
-          Absent
-        </button>
-        <button
-          onClick={() => handleAction("New")}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-700"
-        >
-          Ambil Antrian
-        </button>
-        <button
-          onClick={() => handleAction("Attend")}
-          className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-green-700"
-        >
-          Hadir
+          Ambil Antrian Anda
         </button>
       </div>
     </div>

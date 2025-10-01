@@ -30,7 +30,7 @@ export async function GET() {
       timestamp: row[1],
       status: row[2] || "",
     }));
-
+    
     return NextResponse.json({ queues });
   } catch (err: any) {
     console.error(err);
