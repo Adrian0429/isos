@@ -12,7 +12,7 @@ export async function getSheetData() {
   const sheets = google.sheets({ version: "v4", auth });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: process.env.GOOGLE_SHEET_ID,
-    range: "Queue!A:C",
+    range: "Queue!A:B",
   });
 
   return res.data.values || [];

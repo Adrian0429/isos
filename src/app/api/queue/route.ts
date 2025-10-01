@@ -15,22 +15,39 @@ function getAuth() {
   });
 }
 
+// Helper to get today's date string: YYYY-MM-DD
+function getTodayString() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); 
+}
+
 export async function GET() {
   try {
     const auth = getAuth();
     const sheets = google.sheets({ version: "v4", auth });
+
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A:C`,
+      range: `${SHEET_NAME}!A:B`,
     });
 
     const rows = res.data.values || [];
-    const queues = rows.map((row) => ({
+
+    // Filter queues from today
+    const today = getTodayString();
+    const todayQueues = rows.filter((row) => {
+      if (!row[1]) return false;
+      const datePart = new Date(row[1]).toLocaleDateString("en-CA", {
+        timeZone: "Asia/Seoul",
+      });
+      return datePart === today;
+    });
+
+    const queues = todayQueues.map((row) => ({
       queue: row[0],
       timestamp: row[1],
       status: row[2] || "",
     }));
-    
+
     return NextResponse.json({ queues });
   } catch (err: any) {
     console.error(err);
@@ -41,32 +58,39 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const { action, currentQueue } = await req.json();
-
     const auth = getAuth();
     const sheets = google.sheets({ version: "v4", auth });
 
     // Get all rows
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A:C`,
+      range: `${SHEET_NAME}!A:B`,
     });
 
     const rows = res.data.values || [];
+    const today = getTodayString();
 
-    if (action === "New") {
-      // Generate new queue number
-      const lastRow = rows[rows.length - 1];
-      const lastNum = lastRow ? parseInt(lastRow[0].substring(1)) : 0;
-      const newNum = `A${String(lastNum + 1).padStart(3, "0")}`;
-
-      const now = new Date().toLocaleString("en-US", {
+    // Filter today's rows
+    const todayRows = rows.filter((row) => {
+      if (!row[1]) return false;
+      const datePart = new Date(row[1]).toLocaleDateString("en-CA", {
         timeZone: "Asia/Seoul",
       });
+      return datePart === today;
+    });
 
-      // Append new row
+    if (action === "New") {
+      let lastNum = 0;
+      if (todayRows.length > 0 && todayRows[todayRows.length - 1][0]) {
+        lastNum = parseInt(todayRows[todayRows.length - 1][0].substring(1)) || 0;
+      }
+      const newNum = `A${String(lastNum + 1).padStart(3, "0")}`;
+
+      const now = new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" });
+
       await sheets.spreadsheets.values.append({
         spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A:C`,
+        range: `${SHEET_NAME}!A:B`,
         valueInputOption: "USER_ENTERED",
         requestBody: {
           values: [[newNum, now, ""]],
@@ -74,27 +98,6 @@ export async function POST(req: Request) {
       });
 
       return NextResponse.json({ newQueue: newNum });
-    }
-
-    if (action === "Attend" || action === "Absent") {
-      // Find row of current queue
-      const rowIndex = rows.findIndex((row) => row[0] === currentQueue);
-      if (rowIndex >= 0) {
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SHEET_ID,
-          range: `${SHEET_NAME}!C${rowIndex + 1}`,
-          valueInputOption: "USER_ENTERED",
-          requestBody: {
-            values: [[action.toLowerCase()]],
-          },
-        });
-      }
-
-      // Move to next queue
-      const nextQueue =
-        rowIndex + 1 < rows.length ? rows[rowIndex + 1][0] : currentQueue;
-
-      return NextResponse.json({ currentQueue: nextQueue });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
