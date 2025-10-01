@@ -1,33 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
-export default function QueueUI({
-  initialQueue,
-  queues,
-}: {
-  initialQueue: string;
-  queues: string[];
-}) {
-  const [queue, setQueue] = useState<string>(initialQueue);
+type QueueItem = {
+  queue: string;
+  timestamp: string;
+  status: "empty" | "attend" | "absent";
+};
+
+export default function QueueUI({ initialQueue }: { initialQueue: string }) {
+  const [queues, setQueues] = useState<QueueItem[]>([]);
+  const [currentQueue, setCurrentQueue] = useState<string>(initialQueue);
   const [day, setDay] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
-  const router = useRouter();
 
   useEffect(() => {
     async function fetchQueues() {
-      const res = await fetch("/api/queue"); // create GET API returning current queues
-      const data = await res.json();
-      setQueue(data.queues);
+      try {
+        const res = await fetch("/api/queue");
+        const data: { queues: QueueItem[] } = await res.json();
+        console.log(data);
+        setQueues(data.queues);
+
+        // Keep currentQueue if exists, otherwise first queue
+        setCurrentQueue((prev) => {
+          if (data.queues.some((q) => q.queue === prev)) return prev;
+          return data.queues[1]?.queue || "";
+        });
+      } catch (err) {
+        console.error("Failed to fetch queues:", err);
+      }
     }
 
     fetchQueues();
-    const interval = setInterval(fetchQueues, 5000); // refresh every 5s
+    const interval = setInterval(fetchQueues, 5000);
     return () => clearInterval(interval);
   }, []);
 
+  // Clock display
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -54,32 +65,34 @@ export default function QueueUI({
         })
       );
     }, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
-  function handleNext() {
-    const idx = queues.indexOf(queue);
-    if (idx >= 0 && idx < queues.length - 1) {
-      setQueue(queues[idx + 1]);
-    }
-  }
-
   async function handleAction(action: "Attend" | "Absent" | "New") {
-    const res = await fetch("/api/queue", {
-      method: "POST",
-      body: JSON.stringify({ action, currentQueue: queue }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch("/api/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, currentQueue }),
+      });
+      const data: { newQueue?: string; currentQueue?: string } =
+        await res.json();
 
-    if (action === "New") {
-      if (data.newQueue) {
+      if (action === "New" && data.newQueue) {
         printTicket(data.newQueue);
-        router.refresh();
+      } else if (
+        (action === "Attend" || action === "Absent") &&
+        data.currentQueue
+      ) {
+        setCurrentQueue(data.currentQueue);
       }
-    } else {
-      setQueue(data.currentQueue);
+
+      // Immediately refresh queues
+      const refreshed = await fetch("/api/queue");
+      const refreshedData: { queues: QueueItem[] } = await refreshed.json();
+      setQueues(refreshedData.queues);
+    } catch (err) {
+      console.error("Queue action failed:", err);
     }
   }
 
@@ -88,31 +101,36 @@ export default function QueueUI({
     if (!printWindow) return;
 
     printWindow.document.write(`
-    <html>
-      <head>
-        <style>
-          @page { size: 12cm 5cm; margin: 0; }
-          body { width: 12cm; height: 5cm; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: Arial, sans-serif; }
-          .queue { font-size: 48px; font-weight: bold; color: #FF5722; }
-          .title { font-size: 20px; margin-bottom: 8px; }
-          .footer { font-size: 14px; margin-top: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="title">ISOS - Queue Ticket</div>
-        <div class="queue">${queueNum}</div>
-        <div class="footer">${new Date().toLocaleString("en-US", {
-          timeZone: "Asia/Seoul",
-        })}</div>
-      </body>
-    </html>
-  `);
+      <html>
+        <head>
+          <style>
+            @page { size: 12cm 5cm; margin: 0; }
+            body { width: 12cm; height: 5cm; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: Arial, sans-serif; }
+            .queue { font-size: 48px; font-weight: bold; color: #FF5722; }
+            .title { font-size: 20px; margin-bottom: 8px; }
+            .footer { font-size: 14px; margin-top: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="title">ISOS - Queue Ticket</div>
+          <div class="queue">${queueNum}</div>
+          <div class="footer">${new Date().toLocaleString("en-US", {
+            timeZone: "Asia/Seoul",
+          })}</div>
+        </body>
+      </html>
+    `);
 
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
     printWindow.close();
   }
+
+  // Safe slice for next queues
+  const currentIndex = queues.findIndex((q) => q.queue === currentQueue);
+  const nextQueues =
+    currentIndex >= 0 ? queues.slice(currentIndex + 1, currentIndex + 10) : [];
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
@@ -130,7 +148,7 @@ export default function QueueUI({
       </div>
 
       <div className="flex-grow flex p-6 gap-6">
-        {/* Left Side - Current Serving */}
+        {/* Current Queue */}
         <div className="flex-1 flex flex-col">
           <div className="bg-white rounded-lg shadow-lg p-8 flex-grow flex flex-col justify-center items-center border-2 border-blue-200">
             <div className="text-lg font-medium text-gray-600 mb-4">
@@ -140,23 +158,22 @@ export default function QueueUI({
               Nomor Antrian
             </div>
             <div className="text-6xl font-bold text-orange-500 border-4 border-orange-500 rounded-lg px-8 py-4 mb-6">
-              {queue ?? "Loading..."}
+              {currentQueue || "Loading..."}
             </div>
           </div>
         </div>
 
-        {/* Right Side - Next Queues */}
+        {/* Next Queues */}
         <div className="flex-1 flex flex-col gap-4">
-          {queues
-            .slice(queues.indexOf(queue) + 1, queues.indexOf(queue) + 6)
-            .map((q, i) => (
-              <div
-                key={q}
-                className="bg-blue-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center justify-between font-medium text-lg"
-              >
-                <span>{q}</span>
-              </div>
-            ))}
+          {nextQueues.map((q) => (
+            <div
+              key={q.queue}
+              className="bg-blue-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center justify-between font-medium text-lg"
+            >
+              <span>{q.queue}</span>
+              <span className="text-sm text-gray-200">{q.status}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -180,14 +197,6 @@ export default function QueueUI({
         >
           Hadir
         </button>
-        <a
-          href={`https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL}/export?format=xlsx`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-purple-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-purple-700"
-        >
-          Download Excel
-        </a>
       </div>
     </div>
   );
